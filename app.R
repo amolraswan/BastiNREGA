@@ -9,7 +9,7 @@ source("R/scraper.R")
 
 ui <- page_navbar(
   id = "main_nav",
-  title = "Basti NREGA Daily Attendance",
+  title = uiOutput("app_title", inline = TRUE),
   theme = bs_theme(bootswatch = "flatly"),
   header = tags$head(tags$script(src = "custom.js")),
 
@@ -50,6 +50,14 @@ ui <- page_navbar(
 server <- function(input, output, session) {
 
   rv <- reactiveValues(data = NULL, date_label = NULL)
+
+  output$app_title <- renderUI({
+    if (is.null(rv$date_label)) {
+      "Basti NREGA Daily Person-Days"
+    } else {
+      paste0("Basti NREGA Daily Person-Days ", rv$date_label)
+    }
+  })
 
   # ---- helpers to build panchayat link HTML ----
   make_panchayat_link <- function(block, panchayat) {
