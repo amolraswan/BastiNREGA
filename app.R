@@ -80,7 +80,62 @@ server <- function(input, output, session) {
       return()
     }
 
-    do_scrape(dd, mm, yyyy, input$chk_muster)
+    date_tag <- paste0(sprintf("%02d", as.integer(dd)),
+                       sprintf("%02d", as.integer(mm)),
+                       yyyy)
+    csv_path <- file.path("data", paste0("data_", date_tag, ".csv"))
+
+    can_reuse <- FALSE
+    if (file.exists(csv_path)) {
+      if (input$chk_muster) {
+        existing <- read.csv(csv_path, stringsAsFactors = FALSE, nrows = 5)
+        can_reuse <- "Has_Second_Photo" %in% names(existing) &&
+                     !all(is.na(existing$Has_Second_Photo))
+      } else {
+        can_reuse <- TRUE
+      }
+    }
+
+    if (can_reuse) {
+      showModal(modalDialog(
+        title = "Existing Data Found",
+        paste0("A data file for ", dd, "/", mm, "/", yyyy, " already exists."),
+        footer = tagList(
+          actionButton("btn_use_existing", "Use Existing"),
+          actionButton("btn_rescrape", "Re-scrape"),
+          modalButton("Cancel")
+        )
+      ))
+    } else {
+      do_scrape(dd, mm, yyyy, input$chk_muster)
+    }
+  })
+
+  # ---- Use existing CSV ----
+  observeEvent(input$btn_use_existing, {
+    removeModal()
+    dd   <- trimws(input$dd)
+    mm   <- trimws(input$mm)
+    yyyy <- trimws(input$yyyy)
+    date_tag <- paste0(sprintf("%02d", as.integer(dd)),
+                       sprintf("%02d", as.integer(mm)),
+                       yyyy)
+    csv_path <- file.path("data", paste0("data_", date_tag, ".csv"))
+    df <- read.csv(csv_path, stringsAsFactors = FALSE)
+    if (!"Work_Name" %in% names(df)) df$Work_Name <- NA_character_
+    if (!"Has_Second_Photo" %in% names(df)) df$Has_Second_Photo <- NA
+    rv$data <- df
+    rv$date_label <- paste0(dd, "/", mm, "/", yyyy)
+    output$status_msg <- renderUI(
+      tags$span(style = "color:green;",
+                paste0("Loaded existing data: ", nrow(df), " rows."))
+    )
+  })
+
+  # ---- Re-scrape ----
+  observeEvent(input$btn_rescrape, {
+    removeModal()
+    do_scrape(trimws(input$dd), trimws(input$mm), trimws(input$yyyy), input$chk_muster)
   })
 
   # ---- Scrape function ----
