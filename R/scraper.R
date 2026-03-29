@@ -51,7 +51,7 @@ save_data <- function(df, dd, mm, yyyy) {
 
 scrape_muster_details <- function(df, progress_callback = NULL) {
   n <- nrow(df)
-  batch_size <- 10
+  batch_size <- 25
   total_batches <- ceiling(n / batch_size)
 
   work_names <- rep(NA_character_, n)
@@ -62,7 +62,7 @@ scrape_muster_details <- function(df, progress_callback = NULL) {
     idx_end <- min(b * batch_size, n)
     batch_idx <- idx_start:idx_end
 
-    pool <- new_pool(total_con = 10, host_con = 10)
+    pool <- new_pool(total_con = 25, host_con = 25)
 
     for (i in batch_idx) {
       url <- df$Mustroll_Link[i]
