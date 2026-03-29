@@ -59,16 +59,6 @@ server <- function(input, output, session) {
     }
   })
 
-  # ---- helpers to build panchayat link HTML ----
-  make_panchayat_link <- function(block, panchayat) {
-    sprintf(
-      '<a href="#" class="panchayat-link" data-block="%s" data-panchayat="%s">%s</a>',
-      htmltools::htmlEscape(block, attribute = TRUE),
-      htmltools::htmlEscape(panchayat, attribute = TRUE),
-      htmltools::htmlEscape(panchayat)
-    )
-  }
-
   # ---- Load button ----
   observeEvent(input$btn_load, {
     dd   <- trimws(input$dd)
@@ -171,18 +161,25 @@ server <- function(input, output, session) {
         Persondays = sum(Persondays, na.rm = TRUE),
         .groups = "drop"
       ) %>%
-      mutate(
-        Panchayat_Link = mapply(make_panchayat_link, Block, Panchayat)
-      ) %>%
-      select(Block,
-             Panchayat = Panchayat_Link,
+      select(Block, Panchayat,
              `Work Code` = Work_Code,
              `Mustroll No(s)` = Mustroll_Nos,
-             Persondays)
+             Persondays) %>%
+      mutate(Block = factor(Block), Panchayat = factor(Panchayat),
+             `Work Code` = factor(`Work Code`))
 
     datatable(df, escape = FALSE, rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE,
-                             order = list(list(4, "desc"))),
+                             order = list(list(4, "desc")),
+                             columnDefs = list(list(
+                               targets = 1,
+                               render = DT::JS(
+                                 "function(data, type, row, meta) {",
+                                 "  if (type !== 'display') return data;",
+                                 "  var block = row[0];",
+                                 "  return '<a href=\"#\" class=\"panchayat-link\" data-block=\"' + block + '\" data-panchayat=\"' + data + '\">' + data + '</a>';",
+                                 "}")
+                             ))),
               class = "compact stripe hover")
   })
 
@@ -196,16 +193,20 @@ server <- function(input, output, session) {
         `Total Persondays` = sum(Persondays, na.rm = TRUE),
         .groups = "drop"
       ) %>%
-      mutate(
-        Panchayat_Link = mapply(make_panchayat_link, Block, Panchayat)
-      ) %>%
-      select(Block,
-             Panchayat = Panchayat_Link,
-             `Total Persondays`)
+      mutate(Block = factor(Block), Panchayat = factor(Panchayat))
 
     datatable(df, escape = FALSE, rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE,
-                             order = list(list(2, "desc"))),
+                             order = list(list(2, "desc")),
+                             columnDefs = list(list(
+                               targets = 1,
+                               render = DT::JS(
+                                 "function(data, type, row, meta) {",
+                                 "  if (type !== 'display') return data;",
+                                 "  var block = row[0];",
+                                 "  return '<a href=\"#\" class=\"panchayat-link\" data-block=\"' + block + '\" data-panchayat=\"' + data + '\">' + data + '</a>';",
+                                 "}")
+                             ))),
               class = "compact stripe hover")
   })
 
@@ -249,7 +250,7 @@ server <- function(input, output, session) {
 
     datatable(df, escape = FALSE, rownames = FALSE,
               options = list(pageLength = 50, scrollX = TRUE,
-                             order = list(list(0, "asc"))),
+                             order = list(list(2, "desc"))),
               class = "compact stripe hover")
   })
 
