@@ -23,7 +23,7 @@ ui <- page_navbar(
       column(4, textInput("yyyy", "YYYY", placeholder = "YYYY"))
     ),
     checkboxInput("chk_muster",
-                  "Scrape muster roll details (work names & 2nd photo, ~10 min)",
+                  "Scrape muster roll details (work names & 2nd photo, ~6 min)",
                   value = FALSE),
     actionButton("btn_load", "Load Data", class = "btn-primary w-100"),
     hr(),
