@@ -2,6 +2,7 @@ library(httr)
 library(rvest)
 library(xml2)
 library(dplyr)
+library(curl)
 
 BASE_URL <- "https://mnregaweb4.nic.in/nregaarch/"
 
@@ -48,7 +49,69 @@ save_data <- function(df, dd, mm, yyyy) {
   fname
 }
 
-scrape_basti_data <- function(dd, mm, yyyy, progress_callback = NULL) {
+scrape_muster_details <- function(df, progress_callback = NULL) {
+  n <- nrow(df)
+  batch_size <- 10
+  total_batches <- ceiling(n / batch_size)
+
+  work_names <- rep(NA_character_, n)
+  has_second_photo <- rep(NA, n)
+
+  for (b in seq_len(total_batches)) {
+    idx_start <- (b - 1) * batch_size + 1
+    idx_end <- min(b * batch_size, n)
+    batch_idx <- idx_start:idx_end
+
+    pool <- new_pool(total_con = 10, host_con = 10)
+
+    for (i in batch_idx) {
+      url <- df$Mustroll_Link[i]
+      if (is.na(url) || url == "") next
+
+      local({
+        ii <- i
+        h <- new_handle()
+        handle_setheaders(h,
+          "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        handle_setopt(h, timeout = 30)
+
+        curl_fetch_multi(url, done = function(resp) {
+          tryCatch({
+            html <- read_html(rawToChar(resp$content))
+
+            # Extract work name
+            wn_node <- html_node(html, "span#ContentPlaceHolder1_lbl_dtl")
+            if (!is.na(wn_node)) {
+              wn_text <- html_text2(wn_node)
+              wn <- trimws(sub(".*Work Name\\s*:\\s*", "", wn_text))
+              work_names[ii] <<- wn
+            }
+
+            # Extract second photo status
+            sp_node <- html_node(html, "span#ContentPlaceHolder1_Lblsecond_photo_status")
+            has_second_photo[ii] <<- is.na(sp_node)
+          }, error = function(e) {
+            # leave as NA on parse error
+          })
+        }, fail = function(msg) {
+          # leave as NA on network error
+        }, pool = pool, handle = h)
+      })
+    }
+
+    multi_run(pool = pool)
+
+    if (!is.null(progress_callback)) {
+      progress_callback(b, total_batches)
+    }
+  }
+
+  df$Work_Name <- work_names
+  df$Has_Second_Photo <- has_second_photo
+  df
+}
+
+scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_callback = NULL) {
 
   notify <- function(val, msg) {
     if (!is.null(progress_callback)) progress_callback(val, msg)
@@ -232,6 +295,17 @@ scrape_basti_data <- function(dd, mm, yyyy, progress_callback = NULL) {
   df <- bind_rows(records)
   if (nrow(df) == 0) {
     return(list(success = FALSE, error = "Parsed table was empty."))
+  }
+
+  if (scrape_musters) {
+    notify(0.90, "Fetching muster roll details (work names & photo status)...")
+    df <- scrape_muster_details(df, progress_callback = function(batch_done, total_batches) {
+      frac <- 0.90 + 0.09 * (batch_done / total_batches)
+      notify(frac, paste0("Fetching muster details... batch ", batch_done, "/", total_batches))
+    })
+  } else {
+    df$Work_Name <- NA_character_
+    df$Has_Second_Photo <- NA
   }
 
   notify(1.0, paste0("Done! ", nrow(df), " rows scraped."))

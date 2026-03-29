@@ -22,6 +22,9 @@ ui <- page_navbar(
       column(4, textInput("mm", "MM", placeholder = "MM")),
       column(4, textInput("yyyy", "YYYY", placeholder = "YYYY"))
     ),
+    checkboxInput("chk_muster",
+                  "Scrape muster roll details (work names & 2nd photo, ~10 min)",
+                  value = FALSE),
     actionButton("btn_load", "Load Data", class = "btn-primary w-100"),
     hr(),
     uiOutput("status_msg")
@@ -77,57 +80,17 @@ server <- function(input, output, session) {
       return()
     }
 
-    date_tag <- paste0(sprintf("%02d", as.integer(dd)),
-                       sprintf("%02d", as.integer(mm)),
-                       yyyy)
-    csv_path <- file.path("data", paste0("data_", date_tag, ".csv"))
-
-    if (file.exists(csv_path)) {
-      showModal(modalDialog(
-        title = "Existing Data Found",
-        paste0("A data file for ", dd, "/", mm, "/", yyyy, " already exists."),
-        footer = tagList(
-          actionButton("btn_use_existing", "Use Existing"),
-          actionButton("btn_rescrape", "Re-scrape"),
-          modalButton("Cancel")
-        )
-      ))
-    } else {
-      do_scrape(dd, mm, yyyy)
-    }
-  })
-
-  # ---- Use existing CSV ----
-  observeEvent(input$btn_use_existing, {
-    removeModal()
-    dd   <- trimws(input$dd)
-    mm   <- trimws(input$mm)
-    yyyy <- trimws(input$yyyy)
-    date_tag <- paste0(sprintf("%02d", as.integer(dd)),
-                       sprintf("%02d", as.integer(mm)),
-                       yyyy)
-    csv_path <- file.path("data", paste0("data_", date_tag, ".csv"))
-    df <- read.csv(csv_path, stringsAsFactors = FALSE)
-    rv$data <- df
-    rv$date_label <- paste0(dd, "/", mm, "/", yyyy)
-    output$status_msg <- renderUI(
-      tags$span(style = "color:green;",
-                paste0("Loaded existing data: ", nrow(df), " rows."))
-    )
-  })
-
-  # ---- Re-scrape ----
-  observeEvent(input$btn_rescrape, {
-    removeModal()
-    do_scrape(trimws(input$dd), trimws(input$mm), trimws(input$yyyy))
+    do_scrape(dd, mm, yyyy, input$chk_muster)
   })
 
   # ---- Scrape function ----
-  do_scrape <- function(dd, mm, yyyy) {
+  do_scrape <- function(dd, mm, yyyy, scrape_musters = FALSE) {
     output$status_msg <- renderUI(tags$span(style = "color:blue;", "Scraping in progress..."))
 
     withProgress(message = "Scraping NREGA data...", value = 0, {
-      result <- scrape_basti_data(dd, mm, yyyy, progress_callback = function(val, msg) {
+      result <- scrape_basti_data(dd, mm, yyyy,
+                                  scrape_musters = scrape_musters,
+                                  progress_callback = function(val, msg) {
         setProgress(value = val, detail = msg)
       })
     })
@@ -155,22 +118,31 @@ server <- function(input, output, session) {
     df <- rv$data %>%
       group_by(Block, Panchayat, Work_Code) %>%
       summarise(
+        Work_Name_raw = first(na.omit(Work_Name)),
         Mustroll_Nos = paste0(
           '<a href="', Mustroll_Link, '" target="_blank">', Mustroll_No, '</a>'
         ) %>% paste(collapse = ", "),
+        `2nd Photo Mustrolls` = {
+          photo_rolls <- Mustroll_No[!is.na(Has_Second_Photo) & Has_Second_Photo == TRUE]
+          if (length(photo_rolls) == 0) "-" else paste(photo_rolls, collapse = ", ")
+        },
         Persondays = sum(Persondays, na.rm = TRUE),
         .groups = "drop"
       ) %>%
-      select(Block, Panchayat,
-             `Work Code` = Work_Code,
+      mutate(
+        `Work Code` = paste0(Work_Code, '<br><small>',
+                             ifelse(is.na(Work_Name_raw), "", Work_Name_raw),
+                             '</small>')
+      ) %>%
+      select(Block, Panchayat, `Work Code`,
              `Mustroll No(s)` = Mustroll_Nos,
+             `2nd Photo Mustrolls`,
              Persondays) %>%
-      mutate(Block = factor(Block), Panchayat = factor(Panchayat),
-             `Work Code` = factor(`Work Code`))
+      mutate(Block = factor(Block), Panchayat = factor(Panchayat))
 
     datatable(df, escape = FALSE, rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE,
-                             order = list(list(4, "desc")),
+                             order = list(list(5, "desc")),
                              columnDefs = list(list(
                                targets = 1,
                                render = DT::JS(
@@ -190,6 +162,9 @@ server <- function(input, output, session) {
     df <- rv$data %>%
       group_by(Block, Panchayat) %>%
       summarise(
+        `2nd Photo` = paste0(
+          sum(Has_Second_Photo == TRUE, na.rm = TRUE), "/", n()
+        ),
         `Total Persondays` = sum(Persondays, na.rm = TRUE),
         .groups = "drop"
       ) %>%
@@ -197,7 +172,7 @@ server <- function(input, output, session) {
 
     datatable(df, escape = FALSE, rownames = FALSE, filter = "top",
               options = list(pageLength = 25, scrollX = TRUE,
-                             order = list(list(2, "desc")),
+                             order = list(list(3, "desc")),
                              columnDefs = list(list(
                                targets = 1,
                                render = DT::JS(
@@ -240,17 +215,27 @@ server <- function(input, output, session) {
       filter(Block == input$sel_block, Panchayat == input$sel_panchayat) %>%
       group_by(Work_Code) %>%
       summarise(
+        Work_Name_raw = first(na.omit(Work_Name)),
         `Mustroll No(s)` = paste0(
           '<a href="', Mustroll_Link, '" target="_blank">', Mustroll_No, '</a>'
         ) %>% paste(collapse = ", "),
+        `2nd Photo Mustrolls` = {
+          photo_rolls <- Mustroll_No[!is.na(Has_Second_Photo) & Has_Second_Photo == TRUE]
+          if (length(photo_rolls) == 0) "-" else paste(photo_rolls, collapse = ", ")
+        },
         Persondays = sum(Persondays, na.rm = TRUE),
         .groups = "drop"
       ) %>%
-      select(`Work Code` = Work_Code, `Mustroll No(s)`, Persondays)
+      mutate(
+        `Work Code` = paste0(Work_Code, '<br><small>',
+                             ifelse(is.na(Work_Name_raw), "", Work_Name_raw),
+                             '</small>')
+      ) %>%
+      select(`Work Code`, `Mustroll No(s)`, `2nd Photo Mustrolls`, Persondays)
 
     datatable(df, escape = FALSE, rownames = FALSE,
               options = list(pageLength = 50, scrollX = TRUE,
-                             order = list(list(2, "desc"))),
+                             order = list(list(3, "desc"))),
               class = "compact stripe hover")
   })
 
