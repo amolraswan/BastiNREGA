@@ -2,6 +2,7 @@ library(shiny)
 library(bslib)
 library(DT)
 library(dplyr)
+library(writexl)
 
 source("R/scraper.R")
 
@@ -32,10 +33,12 @@ ui <- page_navbar(
 
   nav_panel(
     "By Work Code",
+    downloadButton("dl_workcode", "Download Excel", class = "btn-sm btn-outline-primary mb-2"),
     DT::dataTableOutput("tbl_workcode")
   ),
   nav_panel(
     "By Panchayat",
+    downloadButton("dl_panchayat", "Download Excel", class = "btn-sm btn-outline-primary mb-2"),
     DT::dataTableOutput("tbl_panchayat")
   ),
   nav_panel(
@@ -44,6 +47,7 @@ ui <- page_navbar(
       column(4, selectInput("sel_block", "Block:", choices = NULL)),
       column(4, selectInput("sel_panchayat", "Panchayat:", choices = NULL))
     ),
+    downloadButton("dl_drilldown", "Download Excel", class = "btn-sm btn-outline-primary mb-2"),
     DT::dataTableOutput("tbl_drilldown")
   )
 )
@@ -293,6 +297,71 @@ server <- function(input, output, session) {
                              order = list(list(3, "desc"))),
               class = "compact stripe hover")
   })
+
+  # ==== Excel Downloads ====================================================
+
+  output$dl_workcode <- downloadHandler(
+    filename = function() {
+      paste0("by_workcode_", gsub("/", "-", rv$date_label), ".xlsx")
+    },
+    content = function(file) {
+      df <- rv$data %>%
+        group_by(Block, Panchayat, Work_Code) %>%
+        summarise(
+          Work_Name = first(na.omit(Work_Name)),
+          `Mustroll No(s)` = paste(Mustroll_No, collapse = ", "),
+          `2nd Photo Mustrolls` = {
+            photo_rolls <- Mustroll_No[!is.na(Has_Second_Photo) & Has_Second_Photo == TRUE]
+            if (length(photo_rolls) == 0) "-" else paste(photo_rolls, collapse = ", ")
+          },
+          Persondays = sum(Persondays, na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        arrange(desc(Persondays))
+      write_xlsx(df, file)
+    }
+  )
+
+  output$dl_panchayat <- downloadHandler(
+    filename = function() {
+      paste0("by_panchayat_", gsub("/", "-", rv$date_label), ".xlsx")
+    },
+    content = function(file) {
+      df <- rv$data %>%
+        group_by(Block, Panchayat) %>%
+        summarise(
+          `2nd Photo` = paste0(sum(Has_Second_Photo == TRUE, na.rm = TRUE), "/", n()),
+          `Total Persondays` = sum(Persondays, na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        arrange(desc(`Total Persondays`))
+      write_xlsx(df, file)
+    }
+  )
+
+  output$dl_drilldown <- downloadHandler(
+    filename = function() {
+      paste0("detail_", input$sel_block, "_", input$sel_panchayat, "_",
+             gsub("/", "-", rv$date_label), ".xlsx")
+    },
+    content = function(file) {
+      df <- rv$data %>%
+        filter(Block == input$sel_block, Panchayat == input$sel_panchayat) %>%
+        group_by(Work_Code) %>%
+        summarise(
+          Work_Name = first(na.omit(Work_Name)),
+          `Mustroll No(s)` = paste(Mustroll_No, collapse = ", "),
+          `2nd Photo Mustrolls` = {
+            photo_rolls <- Mustroll_No[!is.na(Has_Second_Photo) & Has_Second_Photo == TRUE]
+            if (length(photo_rolls) == 0) "-" else paste(photo_rolls, collapse = ", ")
+          },
+          Persondays = sum(Persondays, na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        arrange(desc(Persondays))
+      write_xlsx(df, file)
+    }
+  )
 
   # ==== Cross-tab navigation ==============================================
 
