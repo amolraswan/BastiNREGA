@@ -1566,6 +1566,33 @@
         "Built": "R 4.5.1; ; 2025-09-19 22:18:18 UTC; unix"
       }
     },
+    "writexl": {
+      "Source": "CRAN",
+      "Repository": "https://cloud.r-project.org",
+      "description": {
+        "Package": "writexl",
+        "Type": "Package",
+        "Title": "Export Data Frames to Excel 'xlsx' Format",
+        "Version": "1.5.4",
+        "Authors@R": "c(\n    person(\"Jeroen\", \"Ooms\", ,\"jeroenooms@gmail.com\", role = c(\"aut\", \"cre\"),\n      comment = c(ORCID = \"0000-0002-4035-0289\")),\n    person(\"John McNamara\", role = \"cph\",\n      comment = \"Author of libxlsxwriter (see AUTHORS and COPYRIGHT files for details)\"))",
+        "Description": "Zero-dependency data frame to xlsx exporter based on 'libxlsxwriter'\n    <https://libxlsxwriter.github.io>. Fast and no Java or Excel required.",
+        "License": "BSD_2_clause + file LICENSE",
+        "Encoding": "UTF-8",
+        "URL": "https://ropensci.r-universe.dev/writexl\nhttps://docs.ropensci.org/writexl/",
+        "BugReports": "https://github.com/ropensci/writexl/issues",
+        "RoxygenNote": "7.0.2",
+        "Suggests": "spelling, readxl, nycflights13, testthat, bit64",
+        "Language": "en-US",
+        "SystemRequirements": "zlib",
+        "NeedsCompilation": "yes",
+        "Packaged": "2025-04-15 13:34:41 UTC; jeroen",
+        "Author": "Jeroen Ooms [aut, cre] (<https://orcid.org/0000-0002-4035-0289>),\n  John McNamara [cph] (Author of libxlsxwriter (see AUTHORS and COPYRIGHT\n    files for details))",
+        "Maintainer": "Jeroen Ooms <jeroenooms@gmail.com>",
+        "Repository": "CRAN",
+        "Date/Publication": "2025-04-15 14:40:03 UTC",
+        "Built": "R 4.5.1; x86_64-redhat-linux-gnu; 2025-10-06 00:17:04 UTC; unix"
+      }
+    },
     "xfun": {
       "Source": "CRAN",
       "Repository": "https://cloud.r-project.org",
@@ -1676,10 +1703,22 @@
   },
   "files": {
     "app.R": {
-      "checksum": "f67bd5be7ce404e955d17eee11762634"
+      "checksum": "f7bb0c7c93966caecad64be0710b7a51"
+    },
+    "data/data_22032026.csv": {
+      "checksum": "c8c5bb363eec4ae44e37daaa81ca0f33"
+    },
+    "data/data_24032026.csv": {
+      "checksum": "a919ce611ef6ba6f746ca906435defe2"
+    },
+    "data/data_25032026.csv": {
+      "checksum": "16effa27527a41eae79a40b6cca68f0f"
     },
     "R/scraper.R": {
-      "checksum": "07e73d529d1d09f3bfd9b018a256c266"
+      "checksum": "524a91f2bac93b9148e5cfa9116c0755"
+    },
+    "README.md": {
+      "checksum": "80e0e114c2b6e1246fa211cf57fe9cbe"
     },
     "www/custom.js": {
       "checksum": "441851f7272d2c853a5703243ad6f49b"
