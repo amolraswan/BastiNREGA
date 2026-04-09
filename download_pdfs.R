@@ -1,14 +1,13 @@
 # download_pdfs.R - Save muster roll pages as PDFs using headless Chrome
-# Usage: Rscript download_pdfs.R DD MM YYYY
 #
 # Dependencies: R, Chrome/Chromium, R packages (chromote, httr, rvest, xml2, dplyr, curl)
 # Chrome is auto-detected. Set CHROMOTE_CHROME env var if it's in a non-standard location.
 
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) != 3) {
-  stop("Usage: Rscript download_pdfs.R DD MM YYYY\n  Example: Rscript download_pdfs.R 06 04 2026")
-}
-dd <- args[1]; mm <- args[2]; yyyy <- args[3]
+# ---- SET THE DATE HERE ----
+dd   <- "10"
+mm   <- "04"
+yyyy <- "2026"
+# ---------------------------
 
 # Install chromote if missing
 if (!requireNamespace("chromote", quietly = TRUE)) {
