@@ -80,7 +80,7 @@ scrape_muster_details <- function(df, progress_callback = NULL, html_dir = NULL)
             raw_content <- resp$content
             html <- read_html(rawToChar(raw_content))
 
-            # Save raw HTML copy to disk (will be made self-contained later)
+            # Save HTML copy to disk
             if (!is.null(html_dir)) {
               row <- df[ii, ]
               sanitize <- function(x) gsub("[^A-Za-z0-9_-]", "_", as.character(x))
@@ -126,163 +126,6 @@ scrape_muster_details <- function(df, progress_callback = NULL, html_dir = NULL)
   df$Work_Name <- work_names
   df$Has_Second_Photo <- has_second_photo
   df
-}
-
-make_self_contained <- function(html_dir, progress_callback = NULL) {
-  notify <- function(val, msg) {
-    if (!is.null(progress_callback)) progress_callback(val, msg)
-  }
-
-  html_files <- list.files(html_dir, pattern = "\\.html$", full.names = FALSE)
-  if (length(html_files) == 0) return(invisible(NULL))
-
-  # ---- Step 1: Download common assets once ----
-  notify(0, "Downloading common assets (CSS, JS)...")
-  common_assets <- list(
-    list(url = "https://mnregaweb4.nic.in/nregaarch/css/bootstrap.min.css",  name = "bootstrap.min.css"),
-    list(url = "https://mnregaweb4.nic.in/nregaarch/Scripts/jquery.min.js",  name = "jquery.min.js"),
-    list(url = "https://mnregaweb4.nic.in/nregaarch/Scripts/excelexportjs.js", name = "excelexportjs.js"),
-    list(url = "https://mnregaweb4.nic.in/nregaarch/Scripts/jQuery.print.js",  name = "jQuery.print.js"),
-    list(url = "https://mnregaweb4.nic.in/nregaarch/images/title_logo.jpg",    name = "title_logo.jpg"),
-    list(url = "https://www.google.com/jsapi",                                 name = "jsapi.js"),
-    list(url = "https://www.gstatic.com/charts/loader.js",                     name = "loader.js"),
-    list(url = "https://translation-plugin.bhashini.co.in/v2/website_translation_utility.js", name = "website_translation_utility.js")
-  )
-
-  cache_dir <- file.path(html_dir, "_common_cache")
-  dir.create(cache_dir, showWarnings = FALSE)
-
-  pool <- new_pool(total_con = 10, host_con = 6)
-  for (asset in common_assets) {
-    local({
-      a <- asset
-      h <- new_handle()
-      handle_setheaders(h, "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-      handle_setopt(h, timeout = 30)
-      curl_fetch_multi(a$url, done = function(resp) {
-        tryCatch(writeBin(resp$content, file.path(cache_dir, a$name)), error = function(e) NULL)
-      }, fail = function(msg) NULL, pool = pool, handle = h)
-    })
-  }
-  multi_run(pool = pool)
-
-  # ---- Step 2: Parse photo URLs from each HTML file ----
-  notify(0.15, "Scanning HTML files for photo URLs...")
-  # photo_map: list keyed by html filename, each entry is a list of unique image URLs
-  photo_map <- list()
-  for (fname in html_files) {
-    fpath <- file.path(html_dir, fname)
-    html_text <- tryCatch(readLines(fpath, warn = FALSE, encoding = "UTF-8"), error = function(e) "")
-    html_text <- paste(html_text, collapse = "\n")
-    # Find all image URLs from nregamms servers (group photos)
-    urls <- regmatches(html_text, gregexpr('https?://nregamms[^"\'\\s>]+\\.jpe?g', html_text, perl = TRUE))[[1]]
-    photo_map[[fname]] <- unique(urls)
-  }
-
-  # ---- Step 3: Batch-download all photos ----
-  # Build a flat list of all (url, dest_path) pairs
-  all_downloads <- list()
-  for (fname in html_files) {
-    base_name <- sub("\\.html$", "", fname)
-    files_dir <- file.path(html_dir, paste0(base_name, "_files"))
-    dir.create(files_dir, showWarnings = FALSE)
-
-    # Copy common assets into this page's _files/ folder
-    cached <- list.files(cache_dir, full.names = TRUE)
-    for (cf in cached) {
-      file.copy(cf, file.path(files_dir, basename(cf)), overwrite = TRUE)
-    }
-
-    urls <- photo_map[[fname]]
-    if (length(urls) > 0) {
-      for (j in seq_along(urls)) {
-        ext <- if (grepl("\\.jpeg", urls[j], ignore.case = TRUE)) ".jpeg" else ".jpg"
-        local_name <- paste0("photo_", j, ext)
-        all_downloads[[length(all_downloads) + 1]] <- list(
-          url = urls[j],
-          dest = file.path(files_dir, local_name),
-          html_file = fname,
-          original_url = urls[j],
-          local_name = local_name
-        )
-      }
-    }
-  }
-
-  if (length(all_downloads) > 0) {
-    notify(0.3, paste0("Downloading ", length(all_downloads), " photos..."))
-    batch_size <- 20
-    total_batches <- ceiling(length(all_downloads) / batch_size)
-    for (b in seq_len(total_batches)) {
-      idx_start <- (b - 1) * batch_size + 1
-      idx_end <- min(b * batch_size, length(all_downloads))
-      pool <- new_pool(total_con = 20, host_con = 20)
-      for (k in idx_start:idx_end) {
-        local({
-          dl <- all_downloads[[k]]
-          h <- new_handle()
-          handle_setheaders(h, "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-          handle_setopt(h, timeout = 60)
-          curl_fetch_multi(dl$url, done = function(resp) {
-            tryCatch(writeBin(resp$content, dl$dest), error = function(e) NULL)
-          }, fail = function(msg) NULL, pool = pool, handle = h)
-        })
-      }
-      multi_run(pool = pool)
-      frac <- 0.3 + 0.5 * (b / total_batches)
-      notify(frac, paste0("Downloaded photo batch ", b, "/", total_batches))
-    }
-  }
-
-  # ---- Step 4: Rewrite HTML files to use local paths ----
-  notify(0.85, "Rewriting HTML files to use local paths...")
-  for (fname in html_files) {
-    fpath <- file.path(html_dir, fname)
-    html_text <- tryCatch(readLines(fpath, warn = FALSE, encoding = "UTF-8"), error = function(e) NULL)
-    if (is.null(html_text)) next
-    html_text <- paste(html_text, collapse = "\n")
-
-    base_name <- sub("\\.html$", "", fname)
-    files_prefix <- paste0(base_name, "_files/")
-
-    # Replace common asset references
-    html_text <- gsub('href="css/bootstrap.min.css"',
-      paste0('href="', files_prefix, 'bootstrap.min.css"'), html_text, fixed = TRUE)
-    html_text <- gsub('src="Scripts/jquery.min.js"',
-      paste0('src="', files_prefix, 'jquery.min.js"'), html_text, fixed = TRUE)
-    html_text <- gsub('src="Scripts/excelexportjs.js"',
-      paste0('src="', files_prefix, 'excelexportjs.js"'), html_text, fixed = TRUE)
-    html_text <- gsub('src="Scripts/jQuery.print.js"',
-      paste0('src="', files_prefix, 'jQuery.print.js"'), html_text, fixed = TRUE)
-    html_text <- gsub('href="images/title_logo.jpg"',
-      paste0('href="', files_prefix, 'title_logo.jpg"'), html_text, fixed = TRUE)
-    html_text <- gsub('src="https://www.google.com/jsapi"',
-      paste0('src="', files_prefix, 'jsapi.js"'), html_text, fixed = TRUE)
-    html_text <- gsub('src="https://www.gstatic.com/charts/loader.js"',
-      paste0('src="', files_prefix, 'loader.js"'), html_text, fixed = TRUE)
-    html_text <- gsub(
-      'src="https://translation-plugin.bhashini.co.in/v2/website_translation_utility.js"',
-      paste0('src="', files_prefix, 'website_translation_utility.js"'), html_text, fixed = TRUE)
-
-    # Replace photo URLs with local paths
-    urls <- photo_map[[fname]]
-    if (length(urls) > 0) {
-      for (j in seq_along(urls)) {
-        ext <- if (grepl("\\.jpeg", urls[j], ignore.case = TRUE)) ".jpeg" else ".jpg"
-        local_name <- paste0("photo_", j, ext)
-        # Replace both src= and href= references to this photo URL
-        html_text <- gsub(urls[j], paste0(files_prefix, local_name), html_text, fixed = TRUE)
-      }
-    }
-
-    writeLines(html_text, fpath, useBytes = TRUE)
-  }
-
-  # Clean up the shared cache
-  unlink(cache_dir, recursive = TRUE)
-
-  notify(1, "HTML files are now self-contained.")
-  invisible(NULL)
 }
 
 scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_callback = NULL) {
@@ -473,21 +316,14 @@ scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_cal
 
   html_dir <- NULL
   if (scrape_musters) {
-    notify(0.85, "Fetching muster roll details (work names & photo status)...")
+    notify(0.90, "Fetching muster roll details (work names & photo status)...")
     date_tag <- paste0(sprintf("%02d", as.integer(dd)), sprintf("%02d", as.integer(mm)), yyyy)
     html_dir <- file.path(tempdir(), paste0("html_", date_tag))
     dir.create(html_dir, showWarnings = FALSE, recursive = TRUE)
     df <- scrape_muster_details(df, progress_callback = function(batch_done, total_batches) {
-      frac <- 0.85 + 0.08 * (batch_done / total_batches)
+      frac <- 0.90 + 0.09 * (batch_done / total_batches)
       notify(frac, paste0("Fetching muster details... batch ", batch_done, "/", total_batches))
     }, html_dir = html_dir)
-
-    # Make HTML files self-contained (download CSS, JS, photos)
-    notify(0.93, "Making HTML files self-contained...")
-    make_self_contained(html_dir, progress_callback = function(val, msg) {
-      frac <- 0.93 + 0.06 * val
-      notify(frac, msg)
-    })
   } else {
     df$Work_Name <- NA_character_
     df$Has_Second_Photo <- NA

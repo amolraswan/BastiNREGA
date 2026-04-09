@@ -379,10 +379,8 @@ server <- function(input, output, session) {
       paste0("BASTI_", gsub("/", "-", rv$date_label), ".zip")
     },
     content = function(file) {
-      old_wd <- setwd(rv$html_dir)
-      on.exit(setwd(old_wd))
-      all_files <- list.files(".", recursive = TRUE)
-      zip(file, all_files)
+      html_files <- list.files(rv$html_dir, pattern = "\\.html$", full.names = TRUE)
+      zip(file, html_files, flags = "-j")
     },
     contentType = "application/zip"
   )
