@@ -1,3 +1,4 @@
 data/
+test_output/
 table_to_be_scraped.txt
 .Rhistory
