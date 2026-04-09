@@ -28,8 +28,7 @@ ui <- page_navbar(
                   value = FALSE),
     actionButton("btn_load", "Load Data", class = "btn-primary w-100"),
     hr(),
-    uiOutput("status_msg"),
-    uiOutput("dl_zip_ui")
+    uiOutput("status_msg")
   ),
 
   nav_panel(
@@ -57,7 +56,7 @@ ui <- page_navbar(
 
 server <- function(input, output, session) {
 
-  rv <- reactiveValues(data = NULL, date_label = NULL, html_dir = NULL)
+  rv <- reactiveValues(data = NULL, date_label = NULL)
 
   output$app_title <- renderUI({
     if (is.null(rv$date_label)) {
@@ -131,7 +130,6 @@ server <- function(input, output, session) {
     if (!"Has_Second_Photo" %in% names(df)) df$Has_Second_Photo <- NA
     rv$data <- df
     rv$date_label <- paste0(dd, "/", mm, "/", yyyy)
-    rv$html_dir <- NULL
     output$status_msg <- renderUI(
       tags$span(style = "color:green;",
                 paste0("Loaded existing data: ", nrow(df), " rows."))
@@ -161,7 +159,6 @@ server <- function(input, output, session) {
                          sprintf("%02d", as.integer(mm)), yyyy)
       rv$data <- result$data
       rv$date_label <- paste0(dd, "/", mm, "/", yyyy)
-      rv$html_dir <- result$html_dir
       output$status_msg <- renderUI(
         tags$span(style = "color:green;",
                   paste0("Scraped ", nrow(result$data), " rows. Saved to ", fname))
@@ -364,25 +361,6 @@ server <- function(input, output, session) {
         arrange(desc(Persondays))
       write_xlsx(df, file)
     }
-  )
-
-  # ==== HTML ZIP Download ==================================================
-
-  output$dl_zip_ui <- renderUI({
-    req(rv$html_dir)
-    downloadButton("dl_zip", "Download HTML Copies (ZIP)",
-                   class = "btn-sm btn-outline-secondary w-100 mt-2")
-  })
-
-  output$dl_zip <- downloadHandler(
-    filename = function() {
-      paste0("BASTI_", gsub("/", "-", rv$date_label), ".zip")
-    },
-    content = function(file) {
-      html_files <- list.files(rv$html_dir, pattern = "\\.html$", full.names = TRUE)
-      zip(file, html_files, flags = "-j")
-    },
-    contentType = "application/zip"
   )
 
   # ==== Cross-tab navigation ==============================================
