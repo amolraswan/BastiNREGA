@@ -1,8 +1,1 @@
-data/
-<<<<<<< HEAD
-test_output/
-MusterRollsPDF/
-=======
->>>>>>> parent of e058a3b (hopefully correct changes made to scraper.R and added a test script to test locally)
-table_to_be_scraped.txt
 .Rhistory
