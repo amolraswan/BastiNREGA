@@ -49,7 +49,7 @@ save_data <- function(df, dd, mm, yyyy) {
   fname
 }
 
-scrape_muster_details <- function(df, progress_callback = NULL) {
+scrape_muster_details <- function(df, progress_callback = NULL, html_dir = NULL) {
   n <- nrow(df)
   batch_size <- 20
   total_batches <- ceiling(n / batch_size)
@@ -77,7 +77,24 @@ scrape_muster_details <- function(df, progress_callback = NULL) {
 
         curl_fetch_multi(url, done = function(resp) {
           tryCatch({
-            html <- read_html(rawToChar(resp$content))
+            raw_content <- resp$content
+            html <- read_html(rawToChar(raw_content))
+
+            # Save HTML copy to disk
+            if (!is.null(html_dir)) {
+              row <- df[ii, ]
+              sanitize <- function(x) gsub("[^A-Za-z0-9_-]", "_", as.character(x))
+              fname <- paste0(
+                sanitize(row$Block), "_",
+                sanitize(row$Panchayat), "_",
+                sanitize(row$Work_Code), "_",
+                sanitize(row$Mustroll_No), ".html"
+              )
+              tryCatch(
+                writeBin(raw_content, file.path(html_dir, fname)),
+                error = function(e) NULL
+              )
+            }
 
             # Extract work name
             wn_node <- html_node(html, "span#ContentPlaceHolder1_lbl_dtl")
@@ -297,17 +314,21 @@ scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_cal
     return(list(success = FALSE, error = "Parsed table was empty."))
   }
 
+  html_dir <- NULL
   if (scrape_musters) {
     notify(0.90, "Fetching muster roll details (work names & photo status)...")
+    date_tag <- paste0(sprintf("%02d", as.integer(dd)), sprintf("%02d", as.integer(mm)), yyyy)
+    html_dir <- file.path(tempdir(), paste0("html_", date_tag))
+    dir.create(html_dir, showWarnings = FALSE, recursive = TRUE)
     df <- scrape_muster_details(df, progress_callback = function(batch_done, total_batches) {
       frac <- 0.90 + 0.09 * (batch_done / total_batches)
       notify(frac, paste0("Fetching muster details... batch ", batch_done, "/", total_batches))
-    })
+    }, html_dir = html_dir)
   } else {
     df$Work_Name <- NA_character_
     df$Has_Second_Photo <- NA
   }
 
   notify(1.0, paste0("Done! ", nrow(df), " rows scraped."))
-  list(success = TRUE, data = df)
+  list(success = TRUE, data = df, html_dir = html_dir)
 }
