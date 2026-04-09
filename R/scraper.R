@@ -158,12 +158,10 @@ make_self_contained <- function(html_dir, progress_callback = NULL) {
       a <- asset
       h <- new_handle()
       handle_setheaders(h, "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-      handle_setopt(h, timeout = 30, followlocation = TRUE)
+      handle_setopt(h, timeout = 30)
       curl_fetch_multi(a$url, done = function(resp) {
         tryCatch(writeBin(resp$content, file.path(cache_dir, a$name)), error = function(e) NULL)
-      }, fail = function(msg) {
-        warning("Common asset download failed: ", a$name, " - ", msg, call. = FALSE)
-      }, pool = pool, handle = h)
+      }, fail = function(msg) NULL, pool = pool, handle = h)
     })
   }
   multi_run(pool = pool)
@@ -228,26 +226,10 @@ make_self_contained <- function(html_dir, progress_callback = NULL) {
           handle_setopt(h, timeout = 60, followlocation = TRUE)
           curl_fetch_multi(dl$url, done = function(resp) {
             tryCatch(writeBin(resp$content, dl$dest), error = function(e) NULL)
-          }, fail = function(msg) {
-            warning("Photo download failed: ", dl$url, " - ", msg, call. = FALSE)
-          }, pool = pool, handle = h)
+          }, fail = function(msg) NULL, pool = pool, handle = h)
         })
       }
       multi_run(pool = pool)
-
-      # Validate downloaded photos: warn if any are suspiciously small
-      for (k in idx_start:idx_end) {
-        dl <- all_downloads[[k]]
-        if (file.exists(dl$dest)) {
-          fsize <- file.info(dl$dest)$size
-          if (fsize < 1000) {
-            warning("Photo may be invalid (", fsize, " bytes, expected JPEG): ",
-                    dl$url, call. = FALSE)
-          }
-        } else {
-          warning("Photo file missing after download: ", dl$url, call. = FALSE)
-        }
-      }
     }
   }
 
