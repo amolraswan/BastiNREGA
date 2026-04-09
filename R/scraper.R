@@ -210,12 +210,13 @@ make_self_contained <- function(html_dir, progress_callback = NULL) {
   }
 
   if (length(all_downloads) > 0) {
-    notify(0.3, paste0("Downloading ", length(all_downloads), " photos..."))
     batch_size <- 20
     total_batches <- ceiling(length(all_downloads) / batch_size)
     for (b in seq_len(total_batches)) {
       idx_start <- (b - 1) * batch_size + 1
       idx_end <- min(b * batch_size, length(all_downloads))
+      frac <- 0.3 + 0.5 * (b / total_batches)
+      notify(frac, paste0("Downloading photos... batch ", b, "/", total_batches))
       pool <- new_pool(total_con = 20, host_con = 20)
       for (k in idx_start:idx_end) {
         local({
@@ -229,8 +230,6 @@ make_self_contained <- function(html_dir, progress_callback = NULL) {
         })
       }
       multi_run(pool = pool)
-      frac <- 0.3 + 0.5 * (b / total_batches)
-      notify(frac, paste0("Downloaded photo batch ", b, "/", total_batches))
     }
   }
 
@@ -476,6 +475,7 @@ scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_cal
     notify(0.85, "Fetching muster roll details (work names & photo status)...")
     date_tag <- paste0(sprintf("%02d", as.integer(dd)), sprintf("%02d", as.integer(mm)), yyyy)
     html_dir <- file.path(tempdir(), paste0("html_", date_tag))
+    unlink(html_dir, recursive = TRUE)
     dir.create(html_dir, showWarnings = FALSE, recursive = TRUE)
     df <- scrape_muster_details(df, progress_callback = function(batch_done, total_batches) {
       frac <- 0.85 + 0.08 * (batch_done / total_batches)
