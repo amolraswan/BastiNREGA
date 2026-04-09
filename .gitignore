@@ -1,4 +1,5 @@
 data/
 test_output/
+MusterRollsPDF/
 table_to_be_scraped.txt
 .Rhistory
