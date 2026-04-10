@@ -1,10 +1,10 @@
 # download_pdfs.R - Save muster roll pages as PDFs using headless Chrome
 #
-# Dependencies: R, Chrome/Chromium, R packages (chromote, httr, rvest, xml2, dplyr, curl)
+# Dependencies: R, Chrome/Chromium, R packages (chromote, jsonlite, httr, rvest, xml2, dplyr, curl)
 # Chrome is auto-detected. Set CHROMOTE_CHROME env var if it's in a non-standard location.
 
 # ---- SET THE DATE HERE ----
-dd   <- "10"
+dd   <- "09"
 mm   <- "04"
 yyyy <- "2026"
 # ---------------------------
@@ -16,7 +16,12 @@ if (!requireNamespace("chromote", quietly = TRUE)) {
 }
 
 library(chromote)
+library(jsonlite)
 source("R/scraper.R")
+
+# ---- Validate date early ----
+date_err <- validate_date(dd, mm, yyyy)
+if (!is.null(date_err)) stop("Invalid date (", dd, "/", mm, "/", yyyy, "): ", date_err)
 
 date_tag <- paste0(sprintf("%02d", as.integer(dd)),
                    sprintf("%02d", as.integer(mm)), yyyy)
@@ -42,56 +47,160 @@ sanitize <- function(x) gsub("[^A-Za-z0-9_-]", "_", as.character(x))
 df$pdf_name <- paste0(
   sanitize(df$Block), "_",
   sanitize(df$Panchayat), "_",
+  date_tag, "_",
   sanitize(df$Work_Code), "_",
   sanitize(df$Mustroll_No), ".pdf"
 )
 
+# Check for duplicate filenames and append suffix if needed
+dup_names <- duplicated(df$pdf_name)
+if (any(dup_names)) {
+  cat("  WARNING:", sum(dup_names), "duplicate filename(s) detected — appending row suffix\n")
+  counts <- ave(seq_len(nrow(df)), df$pdf_name, FUN = seq_along)
+  df$pdf_name <- ifelse(
+    df$pdf_name %in% df$pdf_name[dup_names],
+    sub("\\.pdf$", paste0("_", counts, ".pdf"), df$pdf_name),
+    df$pdf_name
+  )
+}
+
 # ---- Step 3: Save each page as PDF via headless Chrome ----
 cat("[2/3] Launching headless Chrome...\n")
 b <- ChromoteSession$new()
+on.exit(try(b$close(), silent = TRUE))
 
 cat("[3/3] Saving", nrow(df), "pages as PDF...\n")
 # Force screen media so print CSS rules don't hide content
 b$Emulation$setEmulatedMedia(media = "screen")
 
-success <- 0; failed <- 0
+success <- 0; failed <- 0; skipped <- 0; already <- 0
+failed_names <- character(0); skipped_names <- character(0)
+
+# Track per-row results for the summary CSV
+log_status   <- character(nrow(df))
+log_attempts <- integer(nrow(df))
 
 for (i in seq_len(nrow(df))) {
   url <- df$Mustroll_Link[i]
   pdf_path <- file.path(output_dir, df$pdf_name[i])
 
+  # --- Skip rows with no URL ---
   if (is.na(url) || url == "") {
     cat(sprintf("  [%d/%d] SKIP (no URL): %s\n", i, nrow(df), df$pdf_name[i]))
-    failed <- failed + 1
+    skipped <- skipped + 1
+    skipped_names <- c(skipped_names, df$pdf_name[i])
+    log_status[i] <- "skipped_no_url"
+    log_attempts[i] <- 0
     next
   }
 
-  tryCatch({
-    b$Page$navigate(url)
-    # Wait for page + images to render
-    Sys.sleep(5)
+  # --- Resume: skip files already downloaded ---
+  if (file.exists(pdf_path) && file.size(pdf_path) >= 51200) {
+    cat(sprintf("  [%d/%d] ALREADY SAVED: %s\n", i, nrow(df), df$pdf_name[i]))
+    already <- already + 1
+    log_status[i] <- "already_saved"
+    log_attempts[i] <- 0
+    next
+  }
 
-    pdf_data <- b$Page$printToPDF(
-      landscape = FALSE,
-      printBackground = TRUE,
-      preferCSSPageSize = FALSE,
-      paperWidth = 8.27,   # A4
-      paperHeight = 11.69  # A4
-    )
+  saved <- FALSE
+  for (attempt in 1:3) {
+    tryCatch({
+      nav_result <- b$Page$navigate(url)
 
-    raw_pdf <- jsonlite::base64_dec(pdf_data$data)
-    writeBin(raw_pdf, pdf_path)
+      # Check for navigation-level errors (DNS failure, connection refused, etc.)
+      if (!is.null(nav_result$errorText) && nzchar(nav_result$errorText)) {
+        cat(sprintf("  [%d/%d] Attempt %d nav error: %s - %s\n",
+                    i, nrow(df), attempt, df$pdf_name[i], nav_result$errorText))
+        if (attempt < 3) Sys.sleep(attempt * 2)
+        next
+      }
+
+      # Wait for the page load event (up to 30s), then a short buffer for rendering
+      tryCatch(
+        b$Page$loadEventFired(timeout = 30),
+        error = function(e) {
+          cat(sprintf("  [%d/%d] Attempt %d: page load timeout, proceeding anyway\n",
+                      i, nrow(df), attempt))
+        }
+      )
+      Sys.sleep(3)
+
+      pdf_data <- b$Page$printToPDF(
+        landscape = FALSE,
+        printBackground = TRUE,
+        preferCSSPageSize = FALSE,
+        paperWidth = 8.27,   # A4
+        paperHeight = 11.69  # A4
+      )
+
+      raw_pdf <- base64_dec(pdf_data$data)
+      writeBin(raw_pdf, pdf_path)
+
+      # Blank pages produce tiny PDFs — treat as failure and retry
+      if (file.size(pdf_path) < 51200) {
+        cat(sprintf("  [%d/%d] Attempt %d: PDF too small (likely blank): %s\n",
+                    i, nrow(df), attempt, df$pdf_name[i]))
+        file.remove(pdf_path)
+        if (attempt < 3) Sys.sleep(attempt * 2)
+      } else {
+        saved <- TRUE
+        log_attempts[i] <- attempt
+        break
+      }
+    }, error = function(e) {
+      cat(sprintf("  [%d/%d] Attempt %d failed: %s - %s\n",
+                  i, nrow(df), attempt, df$pdf_name[i], e$message))
+      if (attempt < 3) Sys.sleep(attempt * 2)
+    })
+  }
+
+  if (saved) {
     success <- success + 1
+    log_status[i] <- "saved"
     cat(sprintf("  [%d/%d] OK: %s\n", i, nrow(df), df$pdf_name[i]))
-  }, error = function(e) {
-    failed <<- failed + 1
-    cat(sprintf("  [%d/%d] FAILED: %s - %s\n", i, nrow(df), df$pdf_name[i], e$message))
-  })
+  } else {
+    failed <- failed + 1
+    failed_names <- c(failed_names, df$pdf_name[i])
+    log_status[i] <- "failed"
+    log_attempts[i] <- 3
+    cat(sprintf("  [%d/%d] FAILED after 3 attempts: %s\n", i, nrow(df), df$pdf_name[i]))
+  }
 }
 
 b$close()
 
+# ---- Summary ----
 cat("\n=== Done ===\n")
-cat("Saved:", success, "PDFs\n")
-cat("Failed:", failed, "\n")
+cat("Saved:         ", success, "PDFs\n")
+if (already > 0)
+  cat("Already saved: ", already, "(skipped on resume)\n")
+if (skipped > 0)
+  cat("Skipped (no URL):", skipped, "\n")
+cat("Failed:        ", failed, "\n")
+
+if (length(skipped_names) > 0) {
+  cat("\nSkipped muster rolls (no URL):\n")
+  for (fn in skipped_names) cat("  -", fn, "\n")
+}
+if (length(failed_names) > 0) {
+  cat("\nFailed muster rolls:\n")
+  for (fn in failed_names) cat("  -", fn, "\n")
+}
 cat("Output:", output_dir, "\n")
+
+# ---- Write summary CSV for easy review ----
+log_df <- data.frame(
+  Block       = df$Block,
+  Panchayat   = df$Panchayat,
+  Work_Code   = df$Work_Code,
+  Mustroll_No = df$Mustroll_No,
+  URL         = df$Mustroll_Link,
+  PDF_File    = df$pdf_name,
+  Status      = log_status,
+  Attempts    = log_attempts,
+  stringsAsFactors = FALSE
+)
+log_path <- file.path(output_dir, paste0("download_log_", date_tag, ".csv"))
+write.csv(log_df, log_path, row.names = FALSE)
+cat("Log:", log_path, "\n")
