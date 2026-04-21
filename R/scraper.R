@@ -19,17 +19,35 @@ get_financial_year <- function(date) {
 }
 
 extract_asp_fields <- function(html) {
-  get_val <- function(id) {
-    node <- html_node(html, paste0("input[name='", id, "']"))
-    if (is.na(node)) return("")
-    val <- html_attr(node, "value")
-    if (is.na(val)) "" else val
+  form <- html_node(html, "form#aspnetForm")
+  if (is.na(form)) form <- html_node(html, "form")
+  fields <- list()
+  for (inp in html_nodes(form, "input[type='hidden']")) {
+    nm  <- html_attr(inp, "name")
+    val <- html_attr(inp, "value")
+    if (!is.na(nm)) fields[[nm]] <- if (is.na(val)) "" else val
   }
-  list(
-    `__VIEWSTATE`          = get_val("__VIEWSTATE"),
-    `__VIEWSTATEGENERATOR` = get_val("__VIEWSTATEGENERATOR"),
-    `__EVENTVALIDATION`    = get_val("__EVENTVALIDATION")
-  )
+  for (sel in html_nodes(form, "select")) {
+    nm <- html_attr(sel, "name")
+    if (is.na(nm)) next
+    opt <- html_node(sel, "option[selected]")
+    if (is.na(opt)) opt <- html_node(sel, "option")
+    if (!is.na(opt)) {
+      val <- html_attr(opt, "value")
+      fields[[nm]] <- if (is.na(val)) "" else val
+    }
+  }
+  fields
+}
+
+extract_form_action <- function(html, base_url) {
+  form <- html_node(html, "form#aspnetForm")
+  if (is.na(form)) form <- html_node(html, "form")
+  action <- html_attr(form, "action")
+  if (is.na(action) || !nzchar(action)) return(base_url)
+  if (grepl("^https?://", action)) return(action)
+  base <- sub("/[^/]*$", "/", base_url)
+  paste0(base, sub("^\\./", "", action))
 }
 
 validate_date <- function(dd, mm, yyyy) {
@@ -156,55 +174,22 @@ scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_cal
     return(list(success = FALSE, error = "Could not load the NMMS attendance page."))
   }
   page_html <- read_html(content(page_resp, "text", encoding = "UTF-8"))
-  fields <- extract_asp_fields(page_html)
+  post_url  <- extract_form_action(page_html, nmms_url)
+  nmms_base <- sub("/[^/?#]*([?#].*)?$", "/", nmms_url)
+  fields    <- extract_asp_fields(page_html)
 
-  # ---- Step 2a: POST — select UTTAR PRADESH (state code 31) ----
-  notify(0.25, "Selecting UTTAR PRADESH...")
-  post1_resp <- tryCatch(
-    POST(nmms_url, handle = h, UA, timeout(60),
-         body = c(fields, list(
-           `__EVENTTARGET`    = "ctl00$ContentPlaceHolder1$ddlstate",
-           `__EVENTARGUMENT`  = "",
-           `ctl00$ContentPlaceHolder1$ddlstate` = "31"
-         )),
-         encode = "form"),
-    error = function(e) NULL
-  )
-  if (is.null(post1_resp) || status_code(post1_resp) != 200) {
-    return(list(success = FALSE, error = "Failed to select state."))
-  }
-  page2_html <- read_html(content(post1_resp, "text", encoding = "UTF-8"))
-  fields2 <- extract_asp_fields(page2_html)
+  # Override state and date, then submit directly — both dropdowns are already
+  # populated on the initial page, so intermediate PostBacks are not needed.
+  fields[["ctl00$ContentPlaceHolder1$ddlstate"]]       <- "31"
+  fields[["ctl00$ContentPlaceHolder1$ddl_attendance"]] <- date_str
+  fields[["__EVENTTARGET"]]   <- ""
+  fields[["__EVENTARGUMENT"]] <- ""
 
-  # ---- Step 2b: POST — select attendance date ----
-  notify(0.35, paste0("Selecting date ", date_str, "..."))
-  post2_resp <- tryCatch(
-    POST(nmms_url, handle = h, UA, timeout(60),
-         body = c(fields2, list(
-           `__EVENTTARGET`    = "ctl00$ContentPlaceHolder1$ddl_attendance",
-           `__EVENTARGUMENT`  = "",
-           `ctl00$ContentPlaceHolder1$ddlstate`        = "31",
-           `ctl00$ContentPlaceHolder1$ddl_attendance`   = date_str
-         )),
-         encode = "form"),
-    error = function(e) NULL
-  )
-  if (is.null(post2_resp) || status_code(post2_resp) != 200) {
-    return(list(success = FALSE, error = "Failed to select date."))
-  }
-  page3_html <- read_html(content(post2_resp, "text", encoding = "UTF-8"))
-  fields3 <- extract_asp_fields(page3_html)
-
-  # ---- Step 2c: POST — click "Show Attendance" ----
-  notify(0.45, "Submitting form...")
+  notify(0.35, paste0("Submitting form for ", date_str, "..."))
   post3_resp <- tryCatch(
-    POST(nmms_url, handle = h, UA, timeout(60),
-         body = c(fields3, list(
-           `__EVENTTARGET`    = "",
-           `__EVENTARGUMENT`  = "",
-           `ctl00$ContentPlaceHolder1$ddlstate`        = "31",
-           `ctl00$ContentPlaceHolder1$ddl_attendance`   = date_str,
-           `ctl00$ContentPlaceHolder1$btn_showreport`   = "Show Attendance"
+    POST(post_url, handle = h, UA, timeout(60),
+         body = c(fields, list(
+           `ctl00$ContentPlaceHolder1$btn_showreport` = "Show Attendance"
          )),
          encode = "form"),
     error = function(e) NULL
@@ -218,7 +203,8 @@ scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_cal
   notify(0.55, "Finding UTTAR PRADESH link...")
   up_node <- html_node(page4_html, xpath = "//a[contains(text(), 'UTTAR PRADESH')]")
   if (is.na(up_node)) {
-    return(list(success = FALSE, error = "UTTAR PRADESH link not found in results. The date may not have data."))
+    writeLines(as.character(page4_html), "/tmp/debug_page4.html")
+    return(list(success = FALSE, error = "UTTAR PRADESH link not found in results. The date may not have data. Debug HTML saved to /tmp/debug_page4.html"))
   }
   up_href <- html_attr(up_node, "href")
   up_url <- gsub(" ", "%20", paste0(BASE_URL, up_href))
