@@ -162,6 +162,12 @@ scrape_basti_data <- function(dd, mm, yyyy, scrape_musters = FALSE, progress_cal
     return(list(success = FALSE, error = "Could not find the NMMS attendance link on the homepage."))
   }
   nmms_url <- sub("^http://", "https://", html_attr(att_node, "href"))
+  nmms_url <- sub(
+    "https://mnregaweb4.dord.gov.in/netnrega",
+    "https://mnregaweb4.nic.in/nregaarch",
+    nmms_url,
+    fixed = TRUE
+  )
   notify(0.10, "Found NMMS attendance link.")
 
   # ---- Step 2: GET the NMMS attendance page ----
