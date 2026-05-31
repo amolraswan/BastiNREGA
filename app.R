@@ -17,7 +17,7 @@ ui <- page_navbar(
   sidebar = sidebar(
     width = 300,
     h5("Select Date"),
-    helpText("Enter a date from the past 14 days (DD / MM / YYYY)"),
+    helpText("Enter a date from the past 7 days"),
     fluidRow(
       column(4, textInput("dd", "DD", placeholder = "DD")),
       column(4, textInput("mm", "MM", placeholder = "MM")),
